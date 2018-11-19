@@ -184,7 +184,7 @@ def parse_iostat(filepath, device_name, has_multiple_inputs = 0):
 
     return data
 
-def parse_statdump(filepath, has_multiple_inputs = 0):
+def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
 
     data = []
     dict = {}
@@ -194,6 +194,7 @@ def parse_statdump(filepath, has_multiple_inputs = 0):
     ignored_empty_cnt = 0
     ignored_useless_cnt = 0
     ignored_error_cnt = 0
+    ignored_filter_cnt = 0
     row_cnt = 0
 
     print('parse_statdump : ' + filepath)
@@ -221,18 +222,26 @@ def parse_statdump(filepath, has_multiple_inputs = 0):
                 ignored_useless_cnt = ignored_useless_cnt + 1
             elif '=' in line:
                 words = line.split ('=')
-                key = prefix + words[0].strip ()
+                key_base = words[0].strip()
+                key = prefix + key_base
                 value = words[1].strip ()
 
-                # only numeric values are added in dictionaries
-                try:
-                    num_val = float (value)
-                    dict[key] = num_val
+                accept_stat = 1
+                if len (stats_filter_list) > 0:
+                    if not key_base in stats_filter_list:
+                        accept_stat = 0
+                        ignored_filter_cnt = ignored_filter_cnt + 1
 
-                    if not key in ref_dict.keys ():
-                        ref_dict[key] = num_val
-                except:
-                    ignored_useless_cnt = ignored_useless_cnt + 1
+                if accept_stat:
+                    # only numeric values are added in dictionaries
+                    try:
+                        num_val = float (value)
+                        dict[key] = num_val
+
+                        if not key in ref_dict.keys ():
+                            ref_dict[key] = num_val
+                    except:
+                        ignored_useless_cnt = ignored_useless_cnt + 1
 
             else:
                 line = line.strip()
@@ -266,6 +275,7 @@ def parse_statdump(filepath, has_multiple_inputs = 0):
     print ('ignored_empty_cnt:', ignored_empty_cnt)
     print ('ignored_useless_cnt:', ignored_useless_cnt)
     print ('ignored_error_cnt:', ignored_error_cnt)
+    print ('ignored_filter_cnt:', ignored_filter_cnt)
     print ('Keys:', ref_dict.keys ().__len__ ())
     print ('Rows:' + str (len (data)) + ' ; ' + str (row_cnt))
 
@@ -323,7 +333,7 @@ def plot_two_graphs(time_array, k1,k2,array1,array2, text_string):
     filename = replace_whitespaces (filename)
 
     if (graph_mode == 1 or graph_mode == 2):
-        fig.savefig (filename, format = 'png', dpi=400)
+        fig.savefig (filename, format = 'png', dpi=PLOT_DPI)
 
 #merges data2 into data1 by key 'merge_key'
 #both data1 and data2 are arrays of dictionary
@@ -547,21 +557,24 @@ def stack_graphs (data, prefix_list, suffix_list):
         for prefix in prefix_list:
             print('          Collecting data from:  ' + prefix + suffix)
 
-            colid = col_positions[prefix + suffix]
-            if (colid < 0):
+            try:
+                colid = col_positions[prefix + suffix]
+            except KeyError:
                 print ('Data not found :' + prefix + suffix )
                 graph_id = graph_id + 1
                 continue
 
             array1 = collect_data_from_table (data_table, colid)
 
-            plt.plot(array1, label=prefix, color= color_set[graph_id])
+            my_graph = plt.plot(array1, label=prefix, color= color_set[graph_id])
+            plt.setp(my_graph, linewidth=1)
             #plt.set_ylabel(prefix, color=color_set[graph_id])
             graph_id = graph_id + 1
 
-        plt.legend()
-        plt.text(0, 0, suffix)
-        plt.close ()
+        plt.legend(loc='lower left', title = suffix, bbox_to_anchor= (0.0, 1.01), ncol=1, borderaxespad=0, frameon=False, fontsize = 'xx-small')
+
+        #plt.text(0, 0, suffix, fontsize=8)
+        #plt.tight_layout(rect=[0, 0.2, 1, 1])
 
         filename = suffix
         filename = replace_whitespaces(filename)
@@ -569,28 +582,50 @@ def stack_graphs (data, prefix_list, suffix_list):
         filename = filename.replace ('.', '')
         filename = filename + '.png'
 
-        plt.savefig (filename, format='png', dpi=400)
+        plt.savefig (filename, format='png', dpi=PLOT_DPI)
 
+        plt.close ()
+
+def parse_stats_filter_file(stats_filter_filename):
+    stats_filter_list = []
+    with open(stats_filter_filename, 'r') as file_object:
+        line = file_object.readline()
+        while line:
+            if not '#' in line:
+                line = line.strip()
+                stats_filter_list.append (line)
+            line = file_object.readline()
+
+    print ('parse_stats_filter_file:' + str (len(stats_filter_list)) + ' filters')
+    return stats_filter_list
 
 def help():
-    print('pystatdump.py -i <inputfile> -m <mode> | --mode=<mode>')
-    print('              -sar-file=<SAR file path>')
-    print('              -iostat-file=<IOSTAT file path>')
-    print('              -graph-mode=<output of graphs>')
-    print('              -corr1-key=<string>')
-    print('              -prefix=<string,string>')
-    print('              -corr1-th=<correlation_threshold 1> -corr2-th=<correlation_threshold 2>')
+    print('pystatdump.py -i <inputfile> ; statdump file output by CUBRID statdump utility (for better display in graphs rename it with version name)')
+    print('              -m <mode> | --mode=<mode>; possible values corr1, corr2, stack')
+    print('              --sar-file=<SAR file path>')
+    print('              --iostat-file=<IOSTAT file path>')
+    print('              --graph-mode=<output of graphs>')
+    print('              --corr1-key=<string>')
+    print('              -p; --prefix=<string>')
+    print('              --corr1-th=<correlation_threshold 1> -corr2-th=<correlation_threshold 2>')
+    print('              --stats-filter-file=<file containing desired stats (by default all stats are read)')
+    print ('')
     print('  mode : corr1 : finds best correlations amount other keys for key provided by corr1-key argument')
     print('  mode : corr2 : for two instance of test (provided using prefix argument ), provides key which do not match (exceeds the correlation threshold)')
+    print('  mode : stack : build stacked graphs (output in files) of each statistic from several versions (each specified by --prefix)')
     print('  corr1-key : name of statistic to be used for finding best correlation within range ')
     print('  corr1-th : first value of threshold (for corr1 mode is mininum the first column)')
     print('  corr2-th : second value of threshold (for corr1 mode is maximum of second column)')
     print('  graph-mode : 0 : display; 1 : file : 2 : both file and display')
+    print('')
+    print('  Multiple -i -iostat-file -sar-file -prefix arguments may be provided, composing a list of arguments of the same kind.')
+    print('  The order of --prefix argument matters in stack mode for the order of drawing')
 
 def main(argv):
    mode = 'corr1'
    sar_list = []
    sar_filepath = ''
+   inputfile_list = []
    iostat_list = []
    iostat_filepath = ''
    iostat_device = 'sda'
@@ -602,10 +637,14 @@ def main(argv):
    prefix_list = ['OLD_', 'CURRENT_']
    has_prefix_arg = 0
    suffix_list = []
+   stats_filter_file = ''
+   stats_filter_list = []
+   PLOT_DPI = 800
 
    try:
-      opts, args = getopt.getopt(argv,"hi:m:p",["ifile=","mode=","corr1-key=", "corr1-th=", "corr2-th=", "sar-file=", "iostat-file=", "iostat-device=", "graph-mode=", "prefix="])
+      opts, args = getopt.getopt(argv,"hi:m:p",["ifile=","mode=","corr1-key=", "corr1-th=", "corr2-th=", "sar-file=", "iostat-file=", "iostat-device=", "graph-mode=", "prefix=", "stats-filter-file="])
    except getopt.GetoptError:
+      print ('Invalid arguments')
       help()
       sys.exit(2)
    for opt, arg in opts:
@@ -634,8 +673,13 @@ def main(argv):
           if has_prefix_arg == 0:
               prefix_list = []
               has_prefix_arg = 1
-
           prefix_list.append (arg)
+      elif opt in ["--stats-filter-file"]:
+          stats_filter_file = arg
+
+   if len (stats_filter_file) > 0:
+       stats_filter_list = parse_stats_filter_file(stats_filter_file)
+
 
    for inputfile in inputfile_list:
         print ('Input file :', inputfile)
@@ -647,13 +691,14 @@ def main(argv):
         print('iostat_filepath :', iostat_filepath)
    print('correlation_1_threshold :', correlation_1_threshold)
    print('correlation_2_threshold :', correlation_2_threshold)
+   print ('stats_filter_file :', stats_filter_file)
 
    if (inputfile_list.__len__() > 1 or sar_list.__len__() > 1 or iostat_list.__len__() > 1) :
        has_multiple_inputs = 1
 
    is_first_input_file = 1
    for inputfile in inputfile_list:
-      stat_data, columns = parse_statdump (inputfile, has_multiple_inputs)
+      stat_data, columns = parse_statdump (inputfile, has_multiple_inputs, stats_filter_list)
 
       first_row = stat_data[0]
       first_time_value = first_row[TIME_COL]
@@ -717,6 +762,10 @@ correlation_1_threshold = 0.73
 correlation_2_threshold = 0.1
 graph_mode = 2
 prefix_list = ['OLD_', 'CURRENT_']
+stats_filter_file = ''
+stats_filter_list = []
+PLOT_DPI=600
+
 
 
 if __name__ == "__main__":
@@ -729,4 +778,5 @@ if __name__ == "__main__":
 
 # --mode stack -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw.raw --prefix=10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw
 
-# --mode stack -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw
+
+# --mode stack --stats-filter-file=stats_filter.txt -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw
