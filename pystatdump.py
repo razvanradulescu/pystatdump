@@ -9,6 +9,7 @@ import matplotlib.dates
 import os.path
 from sys import getsizeof
 from scipy.spatial import distance
+import platform
 
 def replace_whitespaces(str):
     res = str
@@ -32,7 +33,10 @@ def parse_sar(filepath, date_MMDDYY, has_multiple_inputs = 0):
 
     print ('parse_sar : ' + filepath + ' date_MMDDYY:' + str (date_MMDDYY))
 
-    locale.setlocale(locale.LC_ALL, 'English')
+    if ('Linux' in platform.system()):
+        locale.setlocale(locale.LC_ALL, 'en_US')
+    else:
+        locale.setlocale(locale.LC_ALL, 'English')
 
     ll = locale.getlocale(locale.LC_ALL)
 
@@ -119,7 +123,10 @@ def parse_iostat(filepath, device_name, has_multiple_inputs = 0):
 
     print('parse_iostat : ' + filepath + ' device_name:' + device_name)
 
-    locale.setlocale(locale.LC_ALL, 'English')
+    if ('Linux' in platform.system()):
+        locale.setlocale(locale.LC_ALL, 'en_US')
+    else:
+        locale.setlocale(locale.LC_ALL, 'English')
 
     ll = locale.getlocale(locale.LC_ALL)
 
@@ -215,7 +222,10 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
     else:
         prefix = ''
 
-    locale.setlocale(locale.LC_ALL, 'English')
+    if ('Linux' in platform.system()):
+        locale.setlocale(locale.LC_ALL, 'en_US')
+    else:
+        locale.setlocale(locale.LC_ALL, 'English')
 
     ll = locale.getlocale(locale.LC_ALL)
 
