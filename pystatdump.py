@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates
 import os.path
 from sys import getsizeof
+from scipy.spatial import distance
 
 def replace_whitespaces(str):
     res = str
@@ -185,7 +186,15 @@ def parse_iostat(filepath, device_name, has_multiple_inputs = 0):
     return data
 
 def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
-
+    complex_stats_header_list = ['Num_data_page_fix_ext:',
+                     'Num_data_page_promote_ext:',
+                     'Num_data_page_promote_time_ext:',
+                     'Num_data_page_unfix_ext:',
+                     'Time_data_page_lock_acquire_time:',
+                     'Time_data_page_hold_acquire_time:',
+                     'Time_data_page_fix_acquire_time:',
+                     'Num_mvcc_snapshot_ext:',
+                     'Time_obj_lock_acquire_time:']
     data = []
     dict = {}
     ref_dict = {}
@@ -196,6 +205,8 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
     ignored_error_cnt = 0
     ignored_filter_cnt = 0
     row_cnt = 0
+    GET_LOCAL = 'GET_LOCAL'
+    local_timezone = ''
 
     print('parse_statdump : ' + filepath)
 
@@ -211,6 +222,8 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
     with open(filepath, 'r') as file_object:
         line = file_object.readline()
         cnt_lines = 1
+        complex_stat_idx = -1
+        stripped_line = line.strip ()
 
         while line:
             if line.isspace ():
@@ -220,17 +233,44 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
                 ignored_useless_cnt = ignored_useless_cnt + 1
             elif '***' in line:
                 ignored_useless_cnt = ignored_useless_cnt + 1
+            elif GET_LOCAL in line:
+                words = line.split('=')
+                local_timezone = words[1].strip()
+            elif line in complex_stats_header_list or stripped_line in complex_stats_header_list:
+                try:
+                    complex_stat_idx = complex_stats_header_list.index (line)
+                except:
+                    complex_stat_idx = complex_stats_header_list.index(stripped_line)
+
+                if complex_stat_idx == -1:
+                    complex_stat_idx = complex_stats_header_list.index(stripped_line)
+
             elif '=' in line:
                 words = line.split ('=')
                 key_base = words[0].strip()
-                key = prefix + key_base
+
+                if (complex_stat_idx != -1):
+                    key = prefix + complex_stats_header_list[complex_stat_idx]+ '.' + key_base
+                    key = key.replace (':','.')
+                else:
+                    key = prefix + key_base
+
                 value = words[1].strip ()
 
                 accept_stat = 1
                 if len (stats_filter_list) > 0:
-                    if not key_base in stats_filter_list:
-                        accept_stat = 0
-                        ignored_filter_cnt = ignored_filter_cnt + 1
+                    accept_stat = 0
+                    if complex_stat_idx != -1:
+                        curr_complex_stat = complex_stats_header_list[complex_stat_idx]
+                        curr_complex_stat2 = curr_complex_stat.replace (':', '')
+                        if curr_complex_stat in stats_filter_list:
+                            accept_stat = 1
+                        elif curr_complex_stat2 in stats_filter_list:
+                            accept_stat = 1
+                        elif complex_stats_header_list[complex_stat_idx] + '.' + key_base in stats_filter_list:
+                            accept_stat = 1
+                    elif key_base in stats_filter_list:
+                        accept_stat = 1
 
                 if accept_stat:
                     # only numeric values are added in dictionaries
@@ -242,12 +282,17 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
                             ref_dict[key] = num_val
                     except:
                         ignored_useless_cnt = ignored_useless_cnt + 1
+                else:
+                    ignored_filter_cnt = ignored_filter_cnt + 1
 
             else:
                 line = line.strip()
                 try:
                     #dt = parser.parse (line)
-                    dt = datetime.strptime (line, STATDUMP_TIME_FORMAT)
+                    if local_timezone == '':
+                        raise ('Local timezone not found in statdump file ;' + 'Missing line containing :' + GET_LOCAL)
+
+                    dt = datetime.strptime (line, STATDUMP_TIME_FORMAT1 + local_timezone + STATDUMP_TIME_FORMAT2)
                     if (not dt is None):
                         if dict.__len__() > 0:
                             data.append (dict)
@@ -256,6 +301,7 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
 
                         key = TIME_COL
                         dict[key] = dt
+                        complex_stat_idx = -1
                 except:
                     if ':' in line:
                         ignored_useless_cnt = ignored_useless_cnt + 1
@@ -265,6 +311,7 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
 
 
             line = file_object.readline()
+            stripped_line = line.strip()
             cnt_lines = cnt_lines + 1
 
     if dict.__len__() > 0:
@@ -317,23 +364,26 @@ def extend_data(data, ref_dict, add_row_id = 0):
     return data_adj
 
 def plot_two_graphs(time_array, k1,k2,array1,array2, text_string):
-    fig, ax1 = plt.subplots()
-    ax1.plot(time_array, array1, label=k1, color='b')
+    #fig = plt.figure ()
+    axes = plt.axes ()
     myFmt = matplotlib.dates.DateFormatter('%H:%M:%S')
-    ax1.xaxis.set_major_formatter(myFmt)
-    ax1.set_xlabel (text_string)
-    ax1.set_ylabel(k1, color='b')
-    ax2 = ax1.twinx()
-    ax2.plot(time_array, array2, label=k2, color='r')
-    ax2.set_ylabel(k2, color='r')
-    ax2.xaxis.set_major_formatter(myFmt)
-    fig.legend()
+    axes.xaxis.set_major_formatter(myFmt)
+    my_graph = plt.plot(time_array, array1, label=k1, color='b')
+    plt.setp(my_graph, linewidth=1)
+
+    my_graph = plt.plot(time_array, array2, label=k2, color='r')
+    plt.setp(my_graph, linewidth=1)
+
+    plt.legend(loc='lower left', title=text_string, bbox_to_anchor=(0.0, 1.01), ncol=1, borderaxespad=0, frameon=False,
+           fontsize='xx-small')
 
     filename = k1 + k2 + '.png'
     filename = replace_whitespaces (filename)
 
     if (graph_mode == 1 or graph_mode == 2):
-        fig.savefig (filename, format = 'png', dpi=PLOT_DPI)
+        plt.savefig (filename, format = 'png', dpi=PLOT_DPI)
+
+    plt.close()
 
 #merges data2 into data1 by key 'merge_key'
 #both data1 and data2 are arrays of dictionary
@@ -369,13 +419,93 @@ def merge_data (data1, data2, merge_key):
 
     return merged_data
 
-#finds a correlation between columns 'k1' and 'k2' in dataset 'data'
-def find_correlation1(data, k1, k2):
+def merge_data_with_autoscale (data1, data2, merge_key):
+    merged_data = []
+    rowid2=0
+    rowid1=0
+
+    len_1 = len (data1)
+    len_2 = len (data2)
+    scale_factor = len_1 / len_2
+
+    while rowid1 < len_1:
+        row1 = data1[rowid1]
+        key_value1 = row1[merge_key]
+
+        rowid2 = round (rowid1 / scale_factor)
+
+        if rowid2 >= len_2:
+            rowid2 = len_2 - 1
+        if rowid2 < 0:
+            rowid2 = 0
+
+        row2 = data2[rowid2]
+        key_value2 = row2[merge_key]
+
+        if type(key_value2) != type (key_value1):
+            raise ("Merge key do not have the same type")
+
+        for col in row2.keys ():
+            if (col != merge_key):
+                row1[col] = row2[col]
+
+        merged_data.append (row1)
+        rowid1 = rowid1 + 1
+
+    print ("Merged data rows cnt : " + str (len (merged_data)))
+    print ("Merged data columns cnt  : " + str(len(merged_data[0].keys ())))
+
+    return merged_data
+
+def normalize (array, range):
+    n_array = []
+    min_v = min (array)
+    max_v = max (array)
+    if (max_v - min_v < 0.0001):
+        n_array = array
+    else:
+        n_array = list (map (lambda x : range * (x - min_v) / (max_v - min_v), array))
+
+    return n_array
+
+def similarity_func (array1, array2):
+    e_dst = 0
+    n_array1 = []
+    n_array2 = []
+
+    try:
+        n_array1 = normalize (array1, 100)
+        n_array2 = normalize (array2, 100)
+        min1 = min (array1)
+        min2 = min(array2)
+        max1 = max(array1)
+        max2 = max(array2)
+        range1 = max1 - min1
+        range2 = max2 - min2
+
+        e_dst = distance.euclidean(n_array1, n_array2)
+        e_dst = e_dst / len (array1)
+
+        if range2 > range1 and range1 > 0.001:
+            scale_f = range2 / range1
+        elif range1 > range2 and range2 > 0.001:
+            scale_f = range1 / range2
+        else:
+            scale_f = 1
+
+        adj_dist = scale_f * e_dst
+    except:
+        pass
+
+    return e_dst, adj_dist
+
+#finds a similarity between columns 'k1' and 'k2' in dataset 'data'
+def find_similarity1(data, k1, k2):
     array1 = []
     array2 = []
     time_array = []
 
-    print ('find_correlation1', k1,k2)
+    print ('find_similarity1', k1,k2)
     row = data[0]
     if not k1 in row.keys():
         raise ("Key not in row")
@@ -394,23 +524,21 @@ def find_correlation1(data, k1, k2):
         time_array.append (time_value)
 
 
-    #print(numpy.cov(array1, array2))
-    # print (numpy.corrcoef(array1,array2))
     try:
-        corr = pearsonr(array1, array2)
+        e_dst, adj_dist = similarity_func(array1, array2)
     except:
         pass
-    print (corr)
-    if corr[0] > correlation_1_threshold and corr[1] < correlation_2_threshold:
-        text_string = 'Corr = ' + "{:.4f}".format (corr[0]) + ' ; ' +  "{:.4f}".format (corr[1])
+    print (e_dst, adj_dist)
+    if e_dst < similarity_1_threshold or adj_dist < similarity_2_threshold:
+        text_string = 'Sim = ' + "{:.4f}".format (e_dst) + ' ; ' +  "{:.4f}".format (adj_dist)
         plot_two_graphs (time_array, k1, k2, array1, array2, text_string)
 
-def find_correlation2_func (data, k1, k2):
+def find_similarity2_func (data, k1, k2):
     array1 = []
     array2 = []
     time_array = []
 
-    print ('find_correlation2_func (' + k1 + ', ' + k2 + ')')
+    print ('find_similarity2_func (' + k1 + ', ' + k2 + ')')
 
     for row in data:
         val1 = row[k1]
@@ -423,23 +551,23 @@ def find_correlation2_func (data, k1, k2):
         array2.append (val2)
         time_array.append (time_value)
 
-    #print(numpy.cov(array1, array2))
-    # print (numpy.corrcoef(array1,array2))
-    try:
-        corr = pearsonr(array1, array2)
-    except:
-        pass
-    print (corr)
-    if corr[0] < correlation_1_threshold and corr[1] > correlation_2_threshold:
-        text_string = 'Corr = ' + "{:.4f}".format (corr[0]) + ' ; ' +  "{:.4f}".format (corr[1])
+    e_dst = 0
+    n_array1 = []
+    n_array2 = []
+
+    e_dst, adj_dist = similarity_func (array1, array2)
+
+    print (e_dst, adj_dist)
+    if e_dst > similarity_1_threshold or adj_dist > similarity_2_threshold :
+        text_string = 'Sim = ' + "{:.4f}".format (e_dst) + " ; " + "{:.4f}".format (adj_dist)
         plot_two_graphs (time_array, k1, k2, array1, array2, text_string)
 
-#finds a worst correlation of same-keys between subsets 'prefix1' and 'prefix2' in dataset 'data'
-def find_correlation2(data, prefix1, prefix2):
+#finds a worst similarity of same-keys between subsets 'prefix1' and 'prefix2' in dataset 'data'
+def find_similarity2(data, prefix1, prefix2):
     keys_list1 = []
     keys_list2 = []
 
-    print ('find_correlation2', prefix1, prefix2)
+    print ('find_similarity2', prefix1, prefix2)
     row = data[0]
 
     for key in row.keys():
@@ -457,7 +585,7 @@ def find_correlation2(data, prefix1, prefix2):
         for key2 in keys_list2:
             base_key2 = key2.replace(prefix2, '')
             if (base_key1 == base_key2):
-                find_correlation2_func (data, key1, key2)
+                find_similarity2_func (data, key1, key2)
                 found = 1
         if found == 0:
             print('Key ' + prefix1 + ' + ' + base_key1 + ' not found')
@@ -601,37 +729,38 @@ def parse_stats_filter_file(stats_filter_filename):
 
 def help():
     print('pystatdump.py -i <inputfile> ; statdump file output by CUBRID statdump utility (for better display in graphs rename it with version name)')
-    print('              -m <mode> | --mode=<mode>; possible values corr1, corr2, stack')
+    print('              -m <mode> | --mode=<mode>; possible values sim1, sim2, stack')
     print('              --sar-file=<SAR file path>')
     print('              --iostat-file=<IOSTAT file path>')
     print('              --graph-mode=<output of graphs>')
-    print('              --corr1-key=<string>')
+    print('              --sim1-key=<string>')
     print('              -p; --prefix=<string>')
-    print('              --corr1-th=<correlation_threshold 1> -corr2-th=<correlation_threshold 2>')
+    print('              --sim1-th=<similarity_threshold 1> -sim2-th=<similarity_threshold 2>')
     print('              --stats-filter-file=<file containing desired stats (by default all stats are read)')
     print ('')
-    print('  mode : corr1 : finds best correlations amount other keys for key provided by corr1-key argument')
-    print('  mode : corr2 : for two instance of test (provided using prefix argument ), provides key which do not match (exceeds the correlation threshold)')
+    print('  mode : sim1 : finds best similarity amount other keys for key provided by sim1-key argument')
+    print('  mode : sim2 : for two instance of test (provided using prefix argument ), provides key which do not match (exceeds the similarity threshold)')
     print('  mode : stack : build stacked graphs (output in files) of each statistic from several versions (each specified by --prefix)')
-    print('  corr1-key : name of statistic to be used for finding best correlation within range ')
-    print('  corr1-th : first value of threshold (for corr1 mode is mininum the first column)')
-    print('  corr2-th : second value of threshold (for corr1 mode is maximum of second column)')
+    print('  sim1-key : name of statistic to be used for finding best similarity within range ')
+    print('  sim1-th : first value of threshold (for sim1 mode is minimum the first column)')
+    print('  sim2-th : second value of threshold (for sim1 mode is maximum of second column)')
     print('  graph-mode : 0 : display; 1 : file : 2 : both file and display')
+    print('  auto-scale : 0, 1 ; enable auto-scale of X axis to match two series')
     print('')
     print('  Multiple -i -iostat-file -sar-file -prefix arguments may be provided, composing a list of arguments of the same kind.')
     print('  The order of --prefix argument matters in stack mode for the order of drawing')
 
 def main(argv):
-   mode = 'corr1'
+   mode = 'sim1'
    sar_list = []
    sar_filepath = ''
    inputfile_list = []
    iostat_list = []
    iostat_filepath = ''
    iostat_device = 'sda'
-   corr1_key = 'Time_ha_replication_delay_msec'
-   correlation_1_threshold = 0.73
-   correlation_2_threshold = 0.1
+   sim1_key = 'Time_ha_replication_delay_msec'
+   similarity1_threshold = 1
+   similarity_2_threshold = 1
    has_multiple_inputs = 0
    graph_mode = 2
    prefix_list = ['OLD_', 'CURRENT_']
@@ -640,9 +769,10 @@ def main(argv):
    stats_filter_file = ''
    stats_filter_list = []
    PLOT_DPI = 800
+   merge_mode = 'noscale'
 
    try:
-      opts, args = getopt.getopt(argv,"hi:m:p",["ifile=","mode=","corr1-key=", "corr1-th=", "corr2-th=", "sar-file=", "iostat-file=", "iostat-device=", "graph-mode=", "prefix=", "stats-filter-file="])
+      opts, args = getopt.getopt(argv,"hi:m:p",["ifile=","mode=","sim1-key=", "sim1-th=", "sim2-th=", "sar-file=", "iostat-file=", "iostat-device=", "graph-mode=", "prefix=", "stats-filter-file=", "auto-scale="])
    except getopt.GetoptError:
       print ('Invalid arguments')
       help()
@@ -655,12 +785,12 @@ def main(argv):
          inputfile_list.append (arg)
       elif opt in ("-m", "--mode"):
          mode = arg
-      elif opt in ("--corr1-key"):
-         corr1_key = arg
-      elif opt in ["--corr-min-th"]:
-         correlation_1_threshold = arg
-      elif opt in ["--corr-max-th"]:
-         correlation_2_threshold = arg
+      elif opt in ("--sim1-key"):
+         sim1_key = arg
+      elif opt in ["--sim1-th"]:
+         similarity1_threshold = float (arg)
+      elif opt in ["--sim2-th"]:
+          similarity_2_threshold = float (arg)
       elif opt in ["--sar-file"]:
          sar_list.append (arg)
       elif opt in ["--iostat-file"]:
@@ -676,6 +806,10 @@ def main(argv):
           prefix_list.append (arg)
       elif opt in ["--stats-filter-file"]:
           stats_filter_file = arg
+      elif opt in ["--auto-scale"]:
+          if arg == 1:
+              merge_mode = 'autoscale'
+
 
    if len (stats_filter_file) > 0:
        stats_filter_list = parse_stats_filter_file(stats_filter_file)
@@ -684,17 +818,20 @@ def main(argv):
    for inputfile in inputfile_list:
         print ('Input file :', inputfile)
    print ('Mode: ', mode)
-   print('corr1_key :', corr1_key)
+   print('sim1_key :', sim1_key)
    for sar_filepath in sar_list:
         print('sar_filepath :', sar_filepath)
    for iostat_filepath in iostat_list:
         print('iostat_filepath :', iostat_filepath)
-   print('correlation_1_threshold :', correlation_1_threshold)
-   print('correlation_2_threshold :', correlation_2_threshold)
+   print('similarity_1_threshold :', similarity_1_threshold)
+   print('similarity_2_threshold :', similarity_2_threshold)
    print ('stats_filter_file :', stats_filter_file)
 
    if (inputfile_list.__len__() > 1 or sar_list.__len__() > 1 or iostat_list.__len__() > 1) :
        has_multiple_inputs = 1
+
+   if mode in ['sim1', 'sim2']:
+       merge_mode = 'autoscale'
 
    is_first_input_file = 1
    for inputfile in inputfile_list:
@@ -709,7 +846,11 @@ def main(argv):
       if has_multiple_inputs == 0 or is_first_input_file == 1:
           data = ext_stat_data
       else:
-          data = merge_data(data, ext_stat_data, ROWID_COL)
+          if merge_mode == 'noscale':
+              data = merge_data(data, ext_stat_data, ROWID_COL)
+          else:
+              data = merge_data_with_autoscale (data, ext_stat_data, ROWID_COL)
+
 
       is_first_input_file = 0
 
@@ -719,14 +860,20 @@ def main(argv):
    for sar_filepath in sar_list:
         sar_data = parse_sar (sar_filepath, date_MMDDYY, has_multiple_inputs)
         if has_multiple_inputs:
-            data = merge_data(data, sar_data, ROWID_COL)
+            if merge_mode == 'noscale':
+                data = merge_data(data, sar_data, ROWID_COL)
+            else:
+                data = merge_data_with_autoscale(data, sar_data, ROWID_COL)
         else:
             data = merge_data(data, sar_data, TIME_COL)
 
    for iostat_filepath in iostat_list:
        iostat_data = parse_iostat (iostat_filepath, iostat_device, has_multiple_inputs)
        if has_multiple_inputs:
-           data = merge_data(data, iostat_data, ROWID_COL)
+           if merge_mode == 'noscale':
+                data = merge_data(data, iostat_data, ROWID_COL)
+           else:
+               data = merge_data_with_autoscale(data, iostat_data, ROWID_COL)
        else:
            data = merge_data(data, iostat_data, TIME_COL)
 
@@ -734,14 +881,14 @@ def main(argv):
    print ('size of data : ' + str (getsizeof (data)))
    print ('')
 
-   if mode.lower() in 'corr1'.lower():
+   if mode.lower() in 'sim1'.lower():
        columns = data[0]
        for k in columns.keys ():
            if k != 'time' and not 'replication' in k:
-               find_correlation1 (data, corr1_key, k)
+               find_similarity1 (data, sim1_key, k)
 
-   elif mode.lower() in 'corr2'.lower():
-       find_correlation2 (data, prefix_list[0], prefix_list[1])
+   elif mode.lower() in 'sim2'.lower():
+       find_similarity2 (data, prefix_list[0], prefix_list[1])
 
    elif mode.lower() in 'stack'.lower():
        stack_graphs (data, prefix_list, suffix_list)
@@ -752,19 +899,21 @@ def main(argv):
 
 TIME_COL = 'time'
 ROWID_COL = 'rowid'
-STATDUMP_TIME_FORMAT = '%a %B %d %H:%M:%S KST %Y'
+STATDUMP_TIME_FORMAT1 = '%a %B %d %H:%M:%S '
+STATDUMP_TIME_FORMAT2 = ' %Y'
 inputfile_list = []
 sar_filepath = ''
 iostat_filepath = ''
 iostat_device = ''
-corr1_key = ''
-correlation_1_threshold = 0.73
-correlation_2_threshold = 0.1
+sim1_key = ''
+similarity_1_threshold = 1
+similarity_2_threshold = 1
 graph_mode = 2
 prefix_list = ['OLD_', 'CURRENT_']
 stats_filter_file = ''
 stats_filter_list = []
 PLOT_DPI=600
+merge_mode = 'noscale'
 
 
 
@@ -773,8 +922,8 @@ if __name__ == "__main__":
 
 
 
-# --mode corr1 -i CURR_statdump.raw --corr1-th=0.705 --sar-file=CURR_sar_cpu.raw --iostat-file=CURR_iostat.raw
-# --mode corr2 -i CURR_statdump.raw -i OLD_statdump.raw --corr1-th=0.9 --prefix=CURR_statdump.raw --prefix=OLD_statdump.raw --sar-file=CURR_sar_cpu.raw --iostat-file=CURR_iostat.raw
+# --mode sim1 -i 10.2.0.8167-5c392ad_statdump.raw --sim1-th=1 --sar-file=10.2.0.8167-5c392ad_sar_cpu.raw --iostat-file=10.2.0.8167-5c392ad_iostat.raw
+# --mode sim2 --sim1-th=1 --sim2-th=1  --graph-mode=1 -i 10.2.0.7864-d585e59_statdump.raw -i 10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw
 
 # --mode stack -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw.raw --prefix=10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw
 
