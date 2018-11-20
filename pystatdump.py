@@ -480,6 +480,8 @@ def similarity_func (array1, array2):
         min2 = min(array2)
         max1 = max(array1)
         max2 = max(array2)
+        r1 = [min1, max1]
+        r2 = [min2, max2]
         range1 = max1 - min1
         range2 = max2 - min2
 
@@ -497,9 +499,10 @@ def similarity_func (array1, array2):
     except:
         pass
 
-    return e_dst, adj_dist
+    return e_dst, adj_dist, r1, r2
 
 #finds a similarity between columns 'k1' and 'k2' in dataset 'data'
+#ignores series of 'k2' having no variation
 def find_similarity1(data, k1, k2):
     array1 = []
     array2 = []
@@ -525,12 +528,14 @@ def find_similarity1(data, k1, k2):
 
 
     try:
-        e_dst, adj_dist = similarity_func(array1, array2)
+        e_dst, adj_dist, range1, range2 = similarity_func(array1, array2)
     except:
         pass
     print (e_dst, adj_dist)
-    if e_dst < similarity_1_threshold or adj_dist < similarity_2_threshold:
+    if e_dst < similarity_1_threshold and adj_dist < similarity_2_threshold and range2[1] > range2[0]:
         text_string = 'Sim = ' + "{:.4f}".format (e_dst) + ' ; ' +  "{:.4f}".format (adj_dist)
+        text_string = text_string + ' Range:' + "{:.2f}".format (range1[0]) + ' , ' +  "{:.2f}".format (range1[1])
+        text_string = text_string + ' ;' + "{:.2f}".format(range2[0]) + ' , ' + "{:.2f}".format(range2[1])
         plot_two_graphs (time_array, k1, k2, array1, array2, text_string)
 
 def find_similarity2_func (data, k1, k2):
@@ -555,11 +560,13 @@ def find_similarity2_func (data, k1, k2):
     n_array1 = []
     n_array2 = []
 
-    e_dst, adj_dist = similarity_func (array1, array2)
+    e_dst, adj_dist, range1, range2 = similarity_func (array1, array2)
 
     print (e_dst, adj_dist)
     if e_dst > similarity_1_threshold or adj_dist > similarity_2_threshold :
         text_string = 'Sim = ' + "{:.4f}".format (e_dst) + " ; " + "{:.4f}".format (adj_dist)
+        text_string = text_string + ' Range:' + "{:.2f}".format (range1[0]) + ' , ' +  "{:.2f}".format (range1[1])
+        text_string = text_string + ' ;' + "{:.2f}".format(range2[0]) + ' , ' + "{:.2f}".format(range2[1])
         plot_two_graphs (time_array, k1, k2, array1, array2, text_string)
 
 #finds a worst similarity of same-keys between subsets 'prefix1' and 'prefix2' in dataset 'data'
