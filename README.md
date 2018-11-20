@@ -17,3 +17,25 @@ There are three modes of operation:
 
 Future improvements :
  - grouping of several hybrid series into the same graph (now is possible to plot several series but of the same type from different instances)
+
+
+# Running
+
+The tool requires Python3.6 and some packages:
+
+sudo yum install python36u
+sudo yum install python36u-pip
+sudo yum install python36u-tkinter
+
+sudo pip3.6 install scipy
+sudo pip3.6 install matplotlib
+
+You may need this to install Python3.6 in Centos7.x:
+sudo yum install https://centos7.iuscommunity.org/ius-release.rpm
+
+ 
+Use python3.6 pystatdump.py  <args>
+
+To use without an X server, set this before running:
+
+ export MPLBACKEND="agg"
