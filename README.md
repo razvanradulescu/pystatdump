@@ -24,13 +24,19 @@ Future improvements :
 The tool requires Python3.6 and some packages:
 
 sudo yum install python36u
+
 sudo yum install python36u-pip
+
 sudo yum install python36u-tkinter
 
+
 sudo pip3.6 install scipy
+
 sudo pip3.6 install matplotlib
 
+
 You may need this to install Python3.6 in Centos7.x:
+
 sudo yum install https://centos7.iuscommunity.org/ius-release.rpm
 
  
