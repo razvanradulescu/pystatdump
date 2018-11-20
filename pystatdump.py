@@ -671,6 +671,8 @@ def stack_graphs (data, prefix_list, suffix_list):
 
     data_table, col_positions = convert_to_table (data)
 
+    prefix_list_cnt = len (prefix_list)
+
     for key in row.keys():
         if prefix_list[0] in key:
             suffix_key = key
@@ -688,7 +690,7 @@ def stack_graphs (data, prefix_list, suffix_list):
 
     print ('Found keys:' + str (filtered_suffix_list.__len__()))
 
-    color_set = ['b', 'r', 'y', 'c', 'm', 'g', 'k']
+    color_set = ['b', 'r', 'y', 'g', 'k', 'pink']
 
     for suffix in filtered_suffix_list:
         # start a new graph
@@ -716,7 +718,8 @@ def stack_graphs (data, prefix_list, suffix_list):
             #plt.set_ylabel(prefix, color=color_set[graph_id])
             graph_id = graph_id + 1
 
-        plt.legend(loc='lower left', title = suffix, bbox_to_anchor= (0.0, 1.01), ncol=1, borderaxespad=0, frameon=False, fontsize = 'xx-small')
+        leg = plt.legend(loc='lower left', title = suffix, bbox_to_anchor= (0.0, 1.01 - 0.04 * (prefix_list_cnt - 3) ), ncol=1, borderaxespad=0, frameon=False, fontsize = 'xx-small')
+        plt.setp(leg.get_title(), fontsize='xx-small')
 
         #plt.text(0, 0, suffix, fontsize=8)
         #plt.tight_layout(rect=[0, 0.2, 1, 1])
@@ -945,4 +948,4 @@ if __name__ == "__main__":
 # --mode stack -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw.raw --prefix=10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw
 
 
-# --mode stack --stats-filter-file=stats_filter.txt -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw
+# --mode stack --stats-filter-file=stats_filter.txt -i 10.2.0.8130-e96652f_statdump.raw -i 10.2.0.8126-e7da59e_statdump.raw -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix 10.2.0.8126-e7da59e_statdump.raw --prefix=10.2.0.8130-e96652f_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw
