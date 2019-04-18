@@ -19,6 +19,7 @@ def replace_whitespaces(str):
     res = res.replace (';', '')
     res = res.replace('\t', '')
     res = res.replace('\n', '')
+    res = res.replace('/', '')
     return res
 
 def parse_sar(filepath, date_MMDDYY, has_multiple_inputs = 0):
@@ -111,6 +112,89 @@ def parse_sar(filepath, date_MMDDYY, has_multiple_inputs = 0):
 
     return data
 
+def parse_log_applier (filepath, date_MMDDYY, local_timezone, has_multiple_inputs = 0):
+    data = []
+    dict = {}
+    ref_dict = {}
+    cnt_lines = 1
+    ref_dict[TIME_COL] = ''
+    ignored_empty_cnt = 0
+    ignored_useless_cnt = 0
+    ignored_error_cnt = 0
+    datetime_val = ''
+    applier_columns = ['LOG_RECORD_TIMER','FLUSH_REPL_TIMER','REINIT_TIMER','GET_LOG_PAGE_TIMER','CHECK_COMMIT_TIMER','GET_PAGE_TIMER','WRITE_PAGE_TIMER']
+
+    if local_timezone == '':
+        local_timezone = 'KST'
+
+    print ('parse_log_applier : ' + filepath + ' date_MMDDYY:' + str (date_MMDDYY))
+
+    if ('Linux' in platform.system()):
+        locale.setlocale(locale.LC_ALL, 'en_US')
+    else:
+        locale.setlocale(locale.LC_ALL, 'English')
+
+    ll = locale.getlocale(locale.LC_ALL)
+
+    if (has_multiple_inputs):
+        prefix = os.path.basename (filepath) + "."
+    else:
+        prefix = ''
+
+    with open(filepath, 'r') as file_object:
+        line = file_object.readline()
+        cnt_lines = 1
+
+        rowid = 0
+        while line:
+            if line.isspace():
+                #
+                ignored_empty_cnt = ignored_empty_cnt + 1
+            elif 'HA generic' in line and local_timezone in line:
+                if len (dict.keys()) > 1:
+                    data.append (dict)
+                    rowid = rowid + 1
+                line = line.replace ('HA generic:', '')
+                line = line.strip()
+                datetime_val = datetime.strptime(line, STATDUMP_TIME_FORMAT1 + local_timezone + STATDUMP_TIME_FORMAT2)
+                dict = {}
+                dict[TIME_COL] = datetime_val
+                if has_multiple_inputs:
+                    dict[ROWID_COL] = rowid
+            else:
+                found = 0
+                for col in applier_columns:
+                    if col in line:
+                        line = line.strip ()
+                        line = line.replace (':',' ')
+                        line = line.replace(',', ' ')
+                        words = line.split ()
+                        cnt = float (words[1])
+                        time_val = float (words[2])
+                        dict[prefix + col + '_cnt'] = cnt
+                        dict[prefix + col + '_duration'] = time_val
+                        if cnt > 0:
+                            avg_val = time_val / cnt
+                        else:
+                            avg_val = 0
+                        dict[prefix + col + '_avg'] = avg_val
+
+                        found = 1
+                if found == 0:
+                    ignored_useless_cnt = ignored_useless_cnt + 1
+
+            line = file_object.readline()
+            cnt_lines = cnt_lines + 1
+
+    print('Read lines:', cnt_lines)
+    print('ignored_empty_cnt:', ignored_empty_cnt)
+    print('ignored_useless_cnt:', ignored_useless_cnt)
+    print('ignored_error_cnt:', ignored_error_cnt)
+    print('Keys:', ref_dict.keys().__len__())
+
+    return data
+
+
 def parse_iostat(filepath, device_name, has_multiple_inputs = 0):
     data = []
     dict = {}
@@ -200,6 +284,7 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
                      'Time_data_page_lock_acquire_time:',
                      'Time_data_page_hold_acquire_time:',
                      'Time_data_page_fix_acquire_time:',
+                     'Time_data_page_unfix_time:',
                      'Num_mvcc_snapshot_ext:',
                      'Time_obj_lock_acquire_time:']
     data = []
@@ -336,7 +421,7 @@ def parse_statdump(filepath, has_multiple_inputs = 0, stats_filter_list = []):
     print ('Keys:', ref_dict.keys ().__len__ ())
     print ('Rows:' + str (len (data)) + ' ; ' + str (row_cnt))
 
-    return data, ref_dict
+    return data, ref_dict, local_timezone
 
 def extend_data(data, ref_dict, add_row_id = 0):
     data_adj = []
@@ -387,7 +472,12 @@ def plot_two_graphs(time_array, k1,k2,array1,array2, text_string):
     plt.legend(loc='lower left', title=text_string, bbox_to_anchor=(0.0, 1.01), ncol=1, borderaxespad=0, frameon=False,
            fontsize='xx-small')
 
-    filename = k1 + k2 + '.png'
+    if (platform.system () in 'Windows'):
+        filename = k1 + k2;
+        filename = filename[:200] + '.png'
+    else:
+        filename = k1 + k2 + '.png'
+
     filename = replace_whitespaces (filename)
 
     if (graph_mode == 1 or graph_mode == 2):
@@ -423,6 +513,9 @@ def merge_data (data1, data2, merge_key):
             rowid1 = rowid1 + 1
         else:
             rowid2 = rowid2 + 1
+
+    if len (data1) == 0:
+        merged_data = data2
 
     print ("Merged data rows cnt : " + str (len (merged_data)))
     print ("Merged data columns cnt  : " + str(len(merged_data[0].keys ())))
@@ -728,6 +821,11 @@ def stack_graphs (data, prefix_list, suffix_list):
         filename = replace_whitespaces(filename)
 
         filename = filename.replace ('.', '')
+
+        if (platform.system() in 'Windows'):
+            filename = filename[:200]
+
+
         filename = filename + '.png'
 
         plt.savefig (filename, format='png', dpi=PLOT_DPI)
@@ -757,6 +855,8 @@ def help():
     print('              -p; --prefix=<string>')
     print('              --sim1-th=<similarity_threshold 1> -sim2-th=<similarity_threshold 2>')
     print('              --stats-filter-file=<file containing desired stats (by default all stats are read)')
+    print('              --log-applier=<log_applier log file')
+    print('              --log-copy=<log_copy log file')
     print ('')
     print('  mode : sim1 : finds best similarity amount other keys for key provided by sim1-key argument')
     print('  mode : sim2 : for two instance of test (provided using prefix argument ), provides key which do not match (exceeds the similarity threshold)')
@@ -790,9 +890,12 @@ def main(argv):
    stats_filter_list = []
    PLOT_DPI = 800
    merge_mode = 'noscale'
+   log_applier_file_list = []
+   statdump_local_timezone = ''
+   log_copy_file_list = []
 
    try:
-      opts, args = getopt.getopt(argv,"hi:m:p",["ifile=","mode=","sim1-key=", "sim1-th=", "sim2-th=", "sar-file=", "iostat-file=", "iostat-device=", "graph-mode=", "prefix=", "stats-filter-file=", "auto-scale="])
+      opts, args = getopt.getopt(argv,"hi:m:p",["ifile=","mode=","sim1-key=", "sim1-th=", "sim2-th=", "sar-file=", "iostat-file=", "iostat-device=", "graph-mode=", "prefix=", "stats-filter-file=", "auto-scale=", "log-applier=", 'log-copy='])
    except getopt.GetoptError:
       print ('Invalid arguments')
       help()
@@ -815,6 +918,10 @@ def main(argv):
          sar_list.append (arg)
       elif opt in ["--iostat-file"]:
          iostat_list.append (arg)
+      elif opt in ["--log-applier"]:
+          log_applier_file_list.append (arg)
+      elif opt in ["--log-copy"]:
+          log_copy_file_list.append (arg)
       elif opt in ["--iostat-device"]:
           iostat_device = arg
       elif opt in ["--graph-mode"]:
@@ -843,19 +950,25 @@ def main(argv):
         print('sar_filepath :', sar_filepath)
    for iostat_filepath in iostat_list:
         print('iostat_filepath :', iostat_filepath)
+   for log_applier_filepath in log_applier_file_list:
+        print('log_applier_filepath :', log_applier_filepath)
+   for log_copy_filepath in log_copy_file_list:
+        print('log_copy_filepath :', log_copy_filepath)
    print('similarity_1_threshold :', similarity_1_threshold)
    print('similarity_2_threshold :', similarity_2_threshold)
    print ('stats_filter_file :', stats_filter_file)
 
-   if (inputfile_list.__len__() > 1 or sar_list.__len__() > 1 or iostat_list.__len__() > 1) :
+   if (inputfile_list.__len__() > 1 or sar_list.__len__() > 1 or iostat_list.__len__() > 1 or log_applier_file_list.__len__ () > 1 or log_copy_file_list.__len__() > 1) :
        has_multiple_inputs = 1
 
    if mode in ['sim1', 'sim2']:
        merge_mode = 'autoscale'
 
    is_first_input_file = 1
+   date_MMDDYY=''
+   data = []
    for inputfile in inputfile_list:
-      stat_data, columns = parse_statdump (inputfile, has_multiple_inputs, stats_filter_list)
+      stat_data, columns, statdump_local_timezone = parse_statdump (inputfile, has_multiple_inputs, stats_filter_list)
 
       first_row = stat_data[0]
       first_time_value = first_row[TIME_COL]
@@ -896,6 +1009,42 @@ def main(argv):
                data = merge_data_with_autoscale(data, iostat_data, ROWID_COL)
        else:
            data = merge_data(data, iostat_data, TIME_COL)
+
+   for log_applier_filepath in log_applier_file_list:
+        log_applier_data = parse_log_applier (log_applier_filepath, date_MMDDYY, statdump_local_timezone, has_multiple_inputs)
+        columns_log = {}
+        first_row = log_applier_data[0]
+
+        for key in first_row.keys():
+            if not (ROWID_COL in key):
+                columns_log[key] = ''
+
+        ext_stat_data = extend_data(log_applier_data, columns_log, has_multiple_inputs)
+        if has_multiple_inputs:
+            if merge_mode == 'noscale':
+                data = merge_data(data, ext_stat_data, ROWID_COL)
+            else:
+                data = merge_data_with_autoscale(data, ext_stat_data, ROWID_COL)
+        else:
+            data = merge_data(data, ext_stat_data, TIME_COL)
+
+   for log_copy_filepath in log_copy_file_list:
+        log_copy_data = parse_log_applier (log_copy_filepath, date_MMDDYY, statdump_local_timezone, has_multiple_inputs)
+        columns_log = {}
+        first_row = log_copy_data[0]
+
+        for key in first_row.keys():
+            if not (ROWID_COL in key):
+                columns_log[key] = ''
+
+        ext_stat_data = extend_data(log_copy_data, columns_log, has_multiple_inputs)
+        if has_multiple_inputs:
+            if merge_mode == 'noscale':
+                data = merge_data(data, ext_stat_data, ROWID_COL)
+            else:
+                data = merge_data_with_autoscale(data, ext_stat_data, ROWID_COL)
+        else:
+            data = merge_data(data, ext_stat_data, TIME_COL)
 
    print ('')
    print ('size of data : ' + str (getsizeof (data)))
@@ -943,9 +1092,26 @@ if __name__ == "__main__":
 
 
 # --mode sim1 -i 10.2.0.8167-5c392ad_statdump.raw --sim1-th=1 --sar-file=10.2.0.8167-5c392ad_sar_cpu.raw --iostat-file=10.2.0.8167-5c392ad_iostat.raw
-# --mode sim2 --sim1-th=1 --sim2-th=1  --graph-mode=1 -i 10.2.0.7864-d585e59_statdump.raw -i 10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw
+# --mode sim2 --sim1-th=1 --sim2-th=1  --graph-mode=1 -i 10.2.0.8331-c461b45_statdump.raw -i 10.1.0.7663-1ca0ab8_statdump.raw --prefix=10.2.0.8331-c461b45_statdump.raw --prefix=10.1.0.7663-1ca0ab8_statdump.raw
 
 # --mode stack -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw.raw --prefix=10.2.0.8167-5c392ad_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw
 
 
 # --mode stack --stats-filter-file=stats_filter.txt -i 10.2.0.8130-e96652f_statdump.raw -i 10.2.0.8126-e7da59e_statdump.raw -i 10.2.0.8167-5c392ad_statdump.raw -i 10.2.0.7864-d585e59_statdump.raw -i 10.2.0.8107-a05cfaa_statdump.raw --prefix=10.2.0.7864-d585e59_statdump.raw --prefix=10.2.0.8107-a05cfaa_statdump.raw --prefix 10.2.0.8126-e7da59e_statdump.raw --prefix=10.2.0.8130-e96652f_statdump.raw --prefix=10.2.0.8167-5c392ad_statdump.raw
+
+# --mode stack --stats-filter-file=stats_filter.txt -i 10.2.0.7867-92a6918_nCP_statdump.raw -i 10.2.0.8171-a31b090_nCP_nDWB_statdump.raw --prefix=10.2.0.7867-92a6918_nCP_statdump.raw --prefix=10.2.0.8171-a31b090_nCP_nDWB_statdump.raw
+
+# --mode stack  --stats-filter-file=stats_filter.txt -i 10.2.0.8171-a31b090_nCP_nDWB_statdump.raw -i 10.2.0.8172-83b15d0_nCP_nDWB_statdump.raw --prefix=10.2.0.8171-a31b090_nCP_nDWB_statdump.raw --prefix=10.2.0.8172-83b15d0_nCP_nDWB_statdump.raw
+# SAR
+# --mode stack  -i 10.2.0.8167-5c392ad_ES_statdump.raw  --sar-file=10.2.0.7864-d585e59_ES_sar_cpu.raw  --sar-file=10.2.0.8167-5c392ad_ES_sar_cpu.raw --prefix=10.2.0.7864-d585e59_ES_sar_cpu.raw --prefix=10.2.0.8167-5c392ad_ES_sar_cpu.raw
+
+# --mode stack  -i 10.2.0.8167-5c392ad_ES_statdump.raw  --sar-file=10.2.0.7864-d585e59_ES_sar_cpu.raw  --sar-file=10.2.0.8167-5c392ad_ES_sar_cpu.raw --prefix=10.2.0.7864-d585e59_ES_sar_cpu.raw --prefix=10.2.0.8167-5c392ad_ES_sar_cpu.raw
+
+# log-applier
+# --mode stack  -i 10.2.0.8167-5c392ad_ES_statdump.raw  --log-applier=10.2.0.7872-c07d149_applylogdb --log-applier=10.2.0.8180-5e2eaa4_applylogdb --prefix=10.2.0.7872-c07d149_applylogdb --prefix=10.2.0.8180-5e2eaa4_applylogdb
+
+# log-copy
+# --mode stack  -i 10.2.0.8167-5c392ad_ES_statdump.raw  --log-copy=10.2.0.7872-c07d149_copylogdb --log-copy=10.2.0.8180-5e2eaa4_copylogdb --prefix=10.2.0.7872-c07d149_copylogdb --prefix=10.2.0.8180-5e2eaa4_copylogdb
+
+# IOSTAT
+# --mode stack  -i 10.2.0.8167-5c392ad_ES_statdump.raw --iostat-file=10.2.0.7864-d585e59_ES_iostat.raw --iostat-file=10.2.0.8167-5c392ad_ES_iostat.raw --prefix=10.2.0.7864-d585e59_ES_iostat.raw --prefix=10.2.0.8167-5c392ad_ES_iostat.raw
